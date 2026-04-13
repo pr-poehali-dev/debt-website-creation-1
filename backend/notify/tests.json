@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Run notifications check",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": {"sent": 0},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
