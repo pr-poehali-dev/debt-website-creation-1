@@ -261,10 +261,10 @@ export default function App() {
         {/* HOME */}
         {page === "home" && (
           <div className="space-y-5">
-            <div className="flex items-center justify-between pt-2 animate-fade-in">
+            <div className="flex items-center justify-between pt-2 animate-fade-in mx-0 rounded-sm">
               <div>
                 <p className="text-xs font-medium tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.4)" }}>Привет, {user.name.split(" ")[0]}</p>
-                <h1 className="font-oswald text-3xl font-bold text-white tracking-tight">ДолгТрекер</h1>
+                <h1 className="font-oswald text-3xl text-white tracking-tight font-semibold">Ждут долг</h1>
               </div>
               <button onClick={() => setPage("profile")} className="w-10 h-10 rounded-full flex items-center justify-center hover-lift"
                 style={{ background: "linear-gradient(135deg, #00FF87, #00C6FF)" }}>
