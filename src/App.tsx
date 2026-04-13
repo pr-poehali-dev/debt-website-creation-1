@@ -4,7 +4,7 @@ import Icon from "@/components/ui/icon";
 const AUTH_URL = "https://functions.poehali.dev/9e6cb3c9-2167-4397-b320-c59491f09fb2";
 const DEBTS_URL = "https://functions.poehali.dev/2738b4a4-1b2c-4a5c-8b4e-3b9f327e7707";
 
-type Page = "home" | "history" | "stats" | "profile" | "add";
+type Page = "home" | "history" | "stats" | "profile" | "add" | "admin";
 type AuthPage = "login" | "register";
 
 interface User {
@@ -12,6 +12,13 @@ interface User {
   name: string;
   email: string;
   telegram_chat_id?: number | null;
+  is_admin?: boolean;
+}
+
+interface DebtOwner {
+  id: number;
+  name: string;
+  email: string;
 }
 
 interface Debt {
@@ -23,6 +30,7 @@ interface Debt {
   category: string;
   note: string;
   paid: boolean;
+  owner?: DebtOwner;
 }
 
 const fmt = (n: number) =>
@@ -140,10 +148,18 @@ export default function App() {
   const [tgInput, setTgInput] = useState("");
   const [tgSaving, setTgSaving] = useState(false);
   const [notifShown, setNotifShown] = useState(true);
+  const [adminUsers, setAdminUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
-  const loadDebts = useCallback(async (tok: string) => {
-    const res = await api(DEBTS_URL, "action=list", "GET", undefined, tok);
+  const loadDebts = useCallback(async (tok: string, forUserId?: number | null) => {
+    const params = forUserId ? `action=list&user_id=${forUserId}` : "action=list";
+    const res = await api(DEBTS_URL, params, "GET", undefined, tok);
     if (res.ok && res.data?.debts) setDebts(res.data.debts);
+  }, []);
+
+  const loadAdminUsers = useCallback(async (tok: string) => {
+    const res = await api(AUTH_URL, "action=users", "GET", undefined, tok);
+    if (res.ok && res.data?.users) setAdminUsers(res.data.users);
   }, []);
 
   useEffect(() => {
@@ -153,32 +169,37 @@ export default function App() {
       if (res.ok && res.data?.user) {
         setUser(res.data.user);
         await loadDebts(token);
+        if (res.data.user.is_admin) await loadAdminUsers(token);
       } else {
         localStorage.removeItem("token");
         setToken(null);
       }
       setLoading(false);
     })();
-  }, [token, loadDebts]);
+  }, [token, loadDebts, loadAdminUsers]);
 
-  const handleLogin = (tok: string, u: User) => { setToken(tok); setUser(u); loadDebts(tok); };
+  const handleLogin = (tok: string, u: User) => {
+    setToken(tok); setUser(u); loadDebts(tok);
+    if (u.is_admin) loadAdminUsers(tok);
+  };
 
   const handleLogout = async () => {
     if (token) await api(AUTH_URL, "action=logout", "POST", undefined, token);
     localStorage.removeItem("token");
-    setToken(null); setUser(null); setDebts([]);
+    setToken(null); setUser(null); setDebts([]); setAdminUsers([]); setSelectedUserId(null);
   };
 
   const handleAddDebt = async () => {
     if (!form.name || !form.amount || !form.dueDate || !token) return;
-    const res = await api(DEBTS_URL, "action=create", "POST", {
+    const uidParam = selectedUserId ? `&user_id=${selectedUserId}` : "";
+    const res = await api(DEBTS_URL, `action=create${uidParam}`, "POST", {
       name: form.name, amount: Number(form.amount), dueDate: form.dueDate,
       type: form.type, category: form.category, note: form.note,
     }, token);
     if (res.ok) {
-      await loadDebts(token);
+      await loadDebts(token, selectedUserId);
       setForm({ name: "", amount: "", dueDate: "", type: "owe", category: "Личное", note: "" });
-      setPage("home");
+      setPage(selectedUserId ? "admin" : "home");
     }
   };
 
@@ -588,6 +609,150 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {/* ADMIN PAGE */}
+        {page === "admin" && user.is_admin && (
+          <div className="space-y-5 animate-fade-in">
+            <div className="pt-2">
+              <p className="text-xs font-medium tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.4)" }}>Только для тебя</p>
+              <h1 className="font-oswald text-3xl font-bold text-white tracking-tight">Все пользователи</h1>
+            </div>
+
+            {/* Все долги сразу */}
+            {!selectedUserId && (
+              <div className="space-y-3">
+                <h2 className="font-oswald text-base font-bold text-white/60 tracking-wide uppercase text-xs">Все долги платформы</h2>
+                {debts.length === 0 && (
+                  <div className="rounded-2xl p-6 glass text-center">
+                    <p className="text-white/40 text-sm">Нет долгов</p>
+                  </div>
+                )}
+                {debts.filter(d => !d.paid).map((d, i) => (
+                  <div key={d.id} className="rounded-2xl p-4 glass hover-lift animate-fade-in"
+                    style={{ animationDelay: `${i * 40}ms`, borderLeft: `3px solid ${d.type === "owe" ? "#FF2D78" : "#00FF87"}` }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
+                          style={{ background: d.type === "owe" ? "rgba(255,45,120,0.2)" : "rgba(0,255,135,0.2)", color: d.type === "owe" ? "#FF2D78" : "#00FF87" }}>
+                          {d.name.charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-medium text-white text-sm">{d.name}</p>
+                          <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                            👤 {d.owner?.name || "?"} · {d.category}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-oswald font-bold text-sm" style={{ color: d.type === "owe" ? "#FF2D78" : "#00FF87" }}>
+                          {d.type === "owe" ? "-" : "+"}{fmt(d.amount)}
+                        </p>
+                        <p className="text-xs" style={{ color: daysLeft(d.dueDate) < 0 ? "#f87171" : "rgba(255,255,255,0.35)" }}>
+                          {daysLeft(d.dueDate) < 0 ? "просроч." : `${daysLeft(d.dueDate)} дн.`}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => togglePaid(d.id)} className="mt-3 w-full text-xs py-2 rounded-xl transition-all font-medium"
+                      style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                      Закрыть долг
+                    </button>
+                  </div>
+                ))}
+
+                <div className="rounded-2xl p-5 glass-strong mt-4">
+                  <h3 className="font-oswald text-base font-bold text-white mb-3">Пользователи ({adminUsers.length})</h3>
+                  <div className="space-y-2">
+                    {adminUsers.map((u, i) => (
+                      <button key={u.id} onClick={async () => {
+                        setSelectedUserId(u.id);
+                        if (token) await loadDebts(token, u.id);
+                      }}
+                        className="w-full rounded-xl p-3 flex items-center justify-between hover-lift glass animate-fade-in"
+                        style={{ animationDelay: `${i * 40}ms` }}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-black"
+                            style={{ background: "linear-gradient(135deg, #00FF87, #00C6FF)" }}>
+                            {u.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="text-left">
+                            <p className="text-sm font-medium text-white">{u.name}</p>
+                            <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>{u.email}</p>
+                          </div>
+                        </div>
+                        <Icon name="ChevronRight" size={16} style={{ color: "rgba(255,255,255,0.3)" }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Долги конкретного пользователя */}
+            {selectedUserId && (() => {
+              const selUser = adminUsers.find(u => u.id === selectedUserId);
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <button onClick={async () => {
+                      setSelectedUserId(null);
+                      if (token) await loadDebts(token);
+                    }} className="w-9 h-9 rounded-xl glass flex items-center justify-center hover-lift">
+                      <Icon name="ArrowLeft" size={18} className="text-white" />
+                    </button>
+                    <div>
+                      <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Управление долгами</p>
+                      <p className="font-oswald text-lg font-bold text-white">{selUser?.name}</p>
+                    </div>
+                  </div>
+
+                  <button onClick={() => {
+                    setForm({ name: "", amount: "", dueDate: "", type: "owe", category: "Личное", note: "" });
+                    setPage("add");
+                  }} className="w-full rounded-xl p-3 flex items-center justify-center gap-2 text-black font-medium text-sm hover-lift"
+                    style={{ background: "linear-gradient(135deg, #00FF87, #00C6FF)" }}>
+                    <Icon name="Plus" size={16} />
+                    Добавить долг пользователю
+                  </button>
+
+                  {debts.filter(d => !d.paid).length === 0 && (
+                    <div className="rounded-2xl p-6 glass text-center">
+                      <p className="text-white/40 text-sm">Нет активных долгов</p>
+                    </div>
+                  )}
+                  {debts.filter(d => !d.paid).map((d, i) => (
+                    <div key={d.id} className="rounded-2xl p-4 glass hover-lift animate-fade-in"
+                      style={{ animationDelay: `${i * 40}ms`, borderLeft: `3px solid ${d.type === "owe" ? "#FF2D78" : "#00FF87"}` }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold"
+                            style={{ background: d.type === "owe" ? "rgba(255,45,120,0.2)" : "rgba(0,255,135,0.2)", color: d.type === "owe" ? "#FF2D78" : "#00FF87" }}>
+                            {d.name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="font-medium text-white text-sm">{d.name}</p>
+                            <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>{d.category}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-oswald font-bold text-sm" style={{ color: d.type === "owe" ? "#FF2D78" : "#00FF87" }}>
+                            {d.type === "owe" ? "-" : "+"}{fmt(d.amount)}
+                          </p>
+                          <p className="text-xs" style={{ color: daysLeft(d.dueDate) < 0 ? "#f87171" : "rgba(255,255,255,0.4)" }}>
+                            {daysLeft(d.dueDate) < 0 ? "просроч." : `${daysLeft(d.dueDate)} дн.`}
+                          </p>
+                        </div>
+                      </div>
+                      <button onClick={() => togglePaid(d.id)} className="mt-3 w-full text-xs py-2 rounded-xl transition-all font-medium"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>
+                        Закрыть долг
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Bottom Nav */}
@@ -598,12 +763,20 @@ export default function App() {
               { id: "home", icon: "Home", label: "Главная" },
               { id: "history", icon: "Clock", label: "История" },
               { id: "stats", icon: "BarChart2", label: "Статистика" },
+              ...(user.is_admin ? [{ id: "admin", icon: "Shield", label: "Админ" }] : []),
               { id: "profile", icon: "User", label: "Профиль" },
             ].map(item => (
-              <button key={item.id} onClick={() => setPage(item.id as Page)}
-                className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all relative"
-                style={{ color: page === item.id ? "#00FF87" : "rgba(255,255,255,0.4)" }}>
-                {page === item.id && <div className="absolute -top-1 left-1/2 -translate-x-1/2 nav-dot"></div>}
+              <button key={item.id} onClick={() => {
+                if (item.id === "admin" && token) loadDebts(token);
+                setSelectedUserId(null);
+                setPage(item.id as Page);
+              }}
+                className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all relative"
+                style={{ color: page === item.id ? (item.id === "admin" ? "#FFD600" : "#00FF87") : "rgba(255,255,255,0.4)" }}>
+                {page === item.id && (
+                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full"
+                    style={{ background: item.id === "admin" ? "#FFD600" : "#00FF87", boxShadow: `0 0 8px ${item.id === "admin" ? "#FFD600" : "#00FF87"}` }}></div>
+                )}
                 <Icon name={item.icon} size={22} />
                 <span className="text-xs font-medium">{item.label}</span>
               </button>
